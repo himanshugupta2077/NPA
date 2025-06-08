@@ -32,17 +32,6 @@ def get_non_alive_hosts(state):
             non_alive_hosts.append(target)
     return non_alive_hosts
 
-def ask_pn_scan():
-    """Ask user if they want to run Pn scan on non-alive hosts"""
-    while True:
-        response = input("\n[?] Do you want to run a Pn scan on non-alive hosts after all scans are done? (y/n): ").strip().lower()
-        if response in ['y', 'yes']:
-            return True
-        elif response in ['n', 'no']:
-            return False
-        else:
-            print("Please enter 'y' for yes or 'n' for no.")
-
 def run_rustscan_common_ports(targets, timestamp):
     """Run rustscan on common ports"""
     try:
@@ -203,80 +192,46 @@ def run_rustscan_full_port_scan(targets, timestamp):
         print(f"Error in rustscan full port scan: {str(e)}")
         return {}
 
-def parse_naabu_json_output(output_file):
-    """Parse naabu JSON output"""
+def run_nmap_service_scan(targets_with_ports, timestamp, scan_phase=""):
+    """Run nmap service version scan on specified ports for given targets"""
     try:
-        results = {}
-        
-        if not os.path.exists(output_file):
-            return results
-            
-        with open(output_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        data = json.loads(line)
-                        ip = data.get('ip')
-                        port = data.get('port')
-                        
-                        if ip and port:
-                            if ip not in results:
-                                results[ip] = []
-                            results[ip].append(int(port))
-                    except json.JSONDecodeError:
-                        continue
-        
-        # Sort ports for each host
-        for ip in results:
-            results[ip] = sorted(list(set(results[ip])))
-        
-        return results
-        
-    except Exception as e:
-        print(f"Error parsing naabu JSON output: {str(e)}")
-        return {}
-
-def run_nmap_service_scan(state, timestamp):
-    """Run nmap service version scan on all open ports"""
-    try:
-        targets_with_ports = {}
-        
-        # Collect all targets with open ports
-        for target, data in state.get("hosts", {}).items():
-            if data.get("alive", False) and data.get("ports"):
-                open_ports = [str(port) for port in data["ports"].keys()]
-                if open_ports:
-                    targets_with_ports[target] = open_ports
-        
         if not targets_with_ports:
-            print("[*] No open ports found for service scanning")
+            print(f"[*] No open ports found for service scanning in {scan_phase}")
             return {}
         
-        print(f"[*] Running service version scan on {len(targets_with_ports)} targets...")
+        print(f"[*] Running service version scan on {len(targets_with_ports)} targets ({scan_phase})...")
         
         results = {}
         
         for target, ports in targets_with_ports.items():
-            print(f"[*] Scanning services on {target} (ports: {','.join(ports[:5])}{'...' if len(ports) > 5 else ''})")
+            if not ports:
+                continue
+                
+            print(f"[*] Scanning services on {target} (ports: {','.join(map(str, ports[:5]))}{'...' if len(ports) > 5 else ''})")
             
             # Create nmap command
-            output_prefix = os.path.join(FULL_PORT_DIR, f'nmap_sV_{target}_{timestamp}')
+            output_prefix = os.path.join(COMMON_PORT_DIR if "common" in scan_phase.lower() else FULL_PORT_DIR, 
+                                       f'nmap_sV_{target}_{scan_phase}_{timestamp}')
             cmd = [
                 'nmap',
                 '-sV', '-O',
-                '-p', ','.join(ports),
+                '-p', ','.join(map(str, ports)),
                 target,
                 '-oA', output_prefix
             ]
             
             try:
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
                 
                 # Parse nmap XML output for services
                 xml_file = output_prefix + '.xml'
                 services = parse_nmap_service_output(xml_file)
                 results[target] = services
+                
+                if services:
+                    print(f"    Found services: {list(services.keys())}")
+                else:
+                    print(f"    No detailed service info extracted")
                 
             except subprocess.TimeoutExpired:
                 print(f"    Service scan timeout for {target}")
@@ -327,117 +282,138 @@ def parse_nmap_service_output(xml_file):
         print(f"Error parsing nmap service output: {str(e)}")
         return {}
 
-def run_naabu_pn_scan(targets, timestamp):
-    """Run naabu Pn scan on non-alive hosts with common ports"""
+def run_nmap_pn_scan(targets, timestamp):
+    """Run nmap Pn scan on non-alive hosts with common ports"""
     try:
         if not targets:
             return {}
         
         print(f"[*] Running Pn scan on {len(targets)} non-alive hosts...")
         
-        # Create target list file
-        target_file = os.path.join(FULL_PORT_PN_DIR, f'pn_targets_{timestamp}.txt')
-        if not create_target_list_file(targets, target_file):
-            return {}
+        results = {}
         
-        # Expand the ~ to full home directory path for naabu (or use system naabu)
-        naabu_path = os.path.expanduser('~/go/bin/naabu')
+        for target in targets:
+            print(f"[*] Running Pn scan on {target}...")
+            
+            # Create nmap Pn command
+            output_prefix = os.path.join(FULL_PORT_PN_DIR, f'nmap_pn_{target}_{timestamp}')
+            cmd = [
+                'nmap',
+                '-Pn',  # Skip ping, treat all hosts as online
+                '-sS',  # SYN scan
+                '-p', COMMON_PORTS,
+                target,
+                '-oA', output_prefix
+            ]
+            
+            try:
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+                
+                # Parse nmap XML output
+                xml_file = output_prefix + '.xml'
+                open_ports = parse_nmap_pn_output(xml_file)
+                
+                if open_ports:
+                    results[target] = open_ports
+                    print(f"    Found open ports: {open_ports}")
+                else:
+                    print(f"    No open ports found")
+                    
+            except subprocess.TimeoutExpired:
+                print(f"    Nmap Pn scan timeout for {target}")
+            except Exception as e:
+                print(f"    Error running nmap Pn scan on {target}: {str(e)}")
         
-        # If the go/bin version doesn't exist, try system naabu
-        if not os.path.exists(naabu_path):
-            # Try to find naabu in PATH
-            import shutil
-            naabu_path = shutil.which('naabu')
-            if not naabu_path:
-                print(f"    Error: naabu not found in PATH or at ~/go/bin/naabu")
-                os.remove(target_file)
-                return {}
+        return results
         
-        # Construct naabu Pn command
-        output_file = os.path.join(FULL_PORT_PN_DIR, f'naabu_pn_{timestamp}.json')
-        cmd = [
-            naabu_path,
-            '-l', target_file,
-            '-Pn',
-            '-p', COMMON_PORTS,
-            '-o', output_file,
-            '-j'
-        ]
-        
-        try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            # Parse naabu JSON output
-            results = parse_naabu_json_output(output_file)
-            
-            # Clean up target file
-            os.remove(target_file)
-            
-            return results
-            
-        except subprocess.TimeoutExpired:
-            print(f"    Naabu Pn scan timeout")
-            return {}
-        except Exception as e:
-            print(f"    Error running naabu Pn scan: {str(e)}")
-            return {}
-            
     except Exception as e:
-        print(f"Error in naabu Pn scan: {str(e)}")
+        print(f"Error in nmap Pn scan: {str(e)}")
         return {}
 
-def update_state_with_port_results(state, common_results, full_results, service_results, timestamp):
+def parse_nmap_pn_output(xml_file):
+    """Parse nmap XML output for Pn scan results"""
+    try:
+        if not os.path.exists(xml_file):
+            return []
+        
+        from xml.etree import ElementTree as ET
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+        
+        open_ports = []
+        
+        for host in root.findall('host'):
+            ports_elem = host.find('ports')
+            if ports_elem is not None:
+                for port in ports_elem.findall('port'):
+                    state = port.find('state')
+                    if state is not None and state.get('state') == 'open':
+                        port_id = int(port.get('portid'))
+                        open_ports.append(port_id)
+        
+        return sorted(open_ports)
+        
+    except Exception as e:
+        print(f"Error parsing nmap Pn output: {str(e)}")
+        return []
+
+def update_state_with_port_results(state, port_results, service_results, timestamp, scan_type):
     """Update state with port scanning results"""
     try:
-        # Merge common and full port results
-        all_open_ports = set()
-        
-        for target in state.get("hosts", {}):
-            if target in common_results or target in full_results:
-                # Combine ports from both scans
-                ports = set()
-                if target in common_results:
-                    ports.update(common_results[target])
-                if target in full_results:
-                    ports.update(full_results[target])
+        for target in port_results:
+            if target not in state.get("hosts", {}):
+                continue
                 
-                # Update host ports
+            ports = port_results[target]
+            if not ports:
+                continue
+            
+            # Initialize ports dict if it doesn't exist
+            if "ports" not in state["hosts"][target]:
                 state["hosts"][target]["ports"] = {}
-                for port in sorted(ports):
+            
+            # Add new ports
+            for port in ports:
+                if port not in state["hosts"][target]["ports"]:
                     state["hosts"][target]["ports"][port] = {
                         'state': 'open',
                         'protocol': 'tcp',
                         'discovered_by': []
                     }
-                    
-                    # Track discovery method
-                    if target in common_results and port in common_results[target]:
-                        state["hosts"][target]["ports"][port]['discovered_by'].append('rustscan_common')
-                    if target in full_results and port in full_results[target]:
-                        state["hosts"][target]["ports"][port]['discovered_by'].append('rustscan_full')
                 
-                # Update services if available
-                if target in service_results:
-                    state["hosts"][target]["services"] = service_results[target]
-                    for port, service_info in service_results[target].items():
-                        if port in state["hosts"][target]["ports"]:
-                            state["hosts"][target]["ports"][port].update({
-                                'service': service_info
-                            })
+                # Update discovery method
+                if scan_type not in state["hosts"][target]["ports"][port]['discovered_by']:
+                    state["hosts"][target]["ports"][port]['discovered_by'].append(scan_type)
+            
+            # Update services if available
+            if target in service_results and service_results[target]:
+                if "services" not in state["hosts"][target]:
+                    state["hosts"][target]["services"] = {}
                 
-                all_open_ports.update(ports)
+                state["hosts"][target]["services"].update(service_results[target])
+                
+                # Add service info to ports
+                for port, service_info in service_results[target].items():
+                    if port in state["hosts"][target]["ports"]:
+                        state["hosts"][target]["ports"][port]['service'] = service_info
         
         # Update scan metadata
-        state["scans"]["port_scanning"] = {
+        all_open_ports = set()
+        for target_data in state["hosts"].values():
+            if target_data.get("ports"):
+                all_open_ports.update(target_data["ports"].keys())
+        
+        if scan_type not in state.get("scans", {}):
+            state.setdefault("scans", {})[scan_type] = {}
+        
+        state["scans"][scan_type].update({
             "completed": True,
             "timestamp": timestamp,
-            "ports_scanned": sorted(list(all_open_ports)),
-            "total_open_ports": len(all_open_ports),
-            "methods_used": ["rustscan_common", "rustscan_full", "nmap_service"]
-        }
+            "total_open_ports": len(all_open_ports)
+        })
         
         # Update statistics
-        state["statistics"]["total_open_ports"] = len(all_open_ports)
+        state.setdefault("statistics", {})["total_open_ports"] = len(all_open_ports)
         state["statistics"]["services_identified"] = sum(
             len(data.get("services", {})) for data in state["hosts"].values()
         )
@@ -485,38 +461,62 @@ def run_scan():
         
         if not alive_hosts:
             print("[-] No alive hosts found for port scanning.")
-            return False
-        
-        print(f"[*] Found {len(alive_hosts)} alive hosts for port scanning")
-        
-        # Ask about Pn scan before starting
-        run_pn_scan = False
-        if non_alive_hosts:
-            run_pn_scan = ask_pn_scan()
+            if non_alive_hosts:
+                print("[*] Will proceed with Pn scan on non-alive hosts...")
+            else:
+                return False
         
         timestamp = get_timestamp()
         
         # Phase 1: Common port scan with rustscan
-        print(f"\n[*] Phase 1: Common port scan on {len(alive_hosts)} alive hosts...")
-        common_results = run_rustscan_common_ports(alive_hosts, timestamp)
-        print_open_ports_summary(common_results, "Common port")
-        
-        # Update state with common port results
-        state = update_state_with_port_results(state, common_results, {}, {}, timestamp)
-        save_state(state)
+        if alive_hosts:
+            print(f"\n[*] Phase 1: Common port scan on {len(alive_hosts)} alive hosts...")
+            common_results = run_rustscan_common_ports(alive_hosts, timestamp)
+            print_open_ports_summary(common_results, "Common port")
+            
+            # Phase 1.5: Service scan on common ports
+            if common_results:
+                targets_with_common_ports = {target: ports for target, ports in common_results.items() if ports}
+                if targets_with_common_ports:
+                    service_results_common = run_nmap_service_scan(targets_with_common_ports, timestamp, "common_ports")
+                else:
+                    service_results_common = {}
+            else:
+                service_results_common = {}
+            
+            # Update state with common port and service results
+            state = update_state_with_port_results(state, common_results, service_results_common, timestamp, "common_port_scan")
+            save_state(state)
+            print("[+] State updated after common port scan and service detection")
+        else:
+            common_results = {}
+            service_results_common = {}
         
         # Phase 2: Full port scan with rustscan (all ports 1-65535)
-        print(f"\n[*] Phase 2: Full port scan with rustscan (1-65535, excluding common ports)...")
-        full_results = run_rustscan_full_port_scan(alive_hosts, timestamp)
-        print_open_ports_summary(full_results, "Full port")
+        if alive_hosts:
+            print(f"\n[*] Phase 2: Full port scan with rustscan (1-65535, excluding common ports)...")
+            full_results = run_rustscan_full_port_scan(alive_hosts, timestamp)
+            print_open_ports_summary(full_results, "Full port")
+            
+            # Phase 2.5: Service scan on newly found ports
+            if full_results:
+                targets_with_full_ports = {target: ports for target, ports in full_results.items() if ports}
+                if targets_with_full_ports:
+                    service_results_full = run_nmap_service_scan(targets_with_full_ports, timestamp, "full_ports")
+                else:
+                    service_results_full = {}
+            else:
+                service_results_full = {}
+            
+            # Update state with full port and service results
+            state = update_state_with_port_results(state, full_results, service_results_full, timestamp, "full_port_scan")
+            save_state(state)
+            print("[+] State updated after full port scan and service detection")
+        else:
+            full_results = {}
+            service_results_full = {}
         
-        # Update state with full port results
-        state = update_state_with_port_results(state, common_results, full_results, {}, timestamp)
-        save_state(state)
-        
-        print(f"\n[+] Most of the open ports are identified.")
-        
-        # Show all discovered ports
+        # Show total discovered ports
         all_ports = set()
         for results in [common_results, full_results]:
             for target, ports in results.items():
@@ -524,23 +524,10 @@ def run_scan():
         if all_ports:
             print(f"[+] Total unique open ports discovered: {sorted(list(all_ports))}")
         
-        print(f"[*] Now service scan will be started...")
-        
-        # Phase 3: Service version scan with nmap
-        print(f"\n[*] Phase 3: Service version and OS detection scan...")
-        service_results = run_nmap_service_scan(state, timestamp)
-        
-        # Final state update with all results
-        state = update_state_with_port_results(state, common_results, full_results, service_results, timestamp)
-        state = update_state_metadata(state)
-        save_state(state)
-        
-        print(f"[+] Open ports and services identification completed.")
-        
-        # Phase 4: Pn scan if requested
-        if run_pn_scan and non_alive_hosts:
-            print(f"\n[*] Phase 4: Running Pn scan on {len(non_alive_hosts)} non-alive hosts...")
-            pn_results = run_naabu_pn_scan(non_alive_hosts, timestamp)
+        # Phase 3: Pn scan on non-alive hosts (run by default)
+        if non_alive_hosts:
+            print(f"\n[*] Phase 3: Running Pn scan on {len(non_alive_hosts)} non-alive hosts...")
+            pn_results = run_nmap_pn_scan(non_alive_hosts, timestamp)
             
             if pn_results:
                 print(f"[!] Pn scan found responsive hosts that were previously marked as non-alive:")
@@ -550,14 +537,18 @@ def run_scan():
                     # Update state for newly discovered hosts
                     if target in state["hosts"]:
                         state["hosts"][target]["alive"] = True
-                        state["hosts"][target]["detection_methods"] = ["Pn Scan"]
-                        state["hosts"][target]["ports"] = {}
+                        state["hosts"][target]["detection_methods"] = ["Pn_Scan"]
+                        if "ports" not in state["hosts"][target]:
+                            state["hosts"][target]["ports"] = {}
                         for port in ports:
                             state["hosts"][target]["ports"][port] = {
                                 'state': 'open',
                                 'protocol': 'tcp',
-                                'discovered_by': ['naabu_pn']
+                                'discovered_by': ['nmap_pn']
                             }
+                
+                # Update state with Pn scan results
+                state = update_state_with_port_results(state, pn_results, {}, timestamp, "pn_scan")
                 
                 # Update statistics
                 state["statistics"]["alive_hosts"] = sum(
@@ -566,6 +557,7 @@ def run_scan():
                 
                 state = update_state_metadata(state)
                 save_state(state)
+                print("[+] State updated after Pn scan")
             else:
                 print(f"[-] Pn scan found no responsive hosts among non-alive targets.")
         
