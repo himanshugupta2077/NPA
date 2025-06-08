@@ -1,0 +1,24 @@
+templates:
+  - id: ftp-anon-login
+    name: "FTP Anonymous Login Check"
+    description: "Checks for anonymous login on FTP services"
+    match:
+      service: ftp
+      # product: ProFTPD
+      # version: "1.3.5"
+    script: templates/ftp-anon-login.sh
+    auto_run: true
+    severity: low
+    timeout: 10
+
+  - id: ssh-cve-2018-15473
+    name: "OpenSSH User Enumeration"
+    description: "Detects vulnerable OpenSSH versions allowing user enumeration"
+    match:
+      service: ssh
+      # product: OpenSSH
+      # version: "6.6.1p1 Ubuntu 2ubuntu2.13"
+    script: templates/ssh-cve-2018-15473.sh
+    auto_run: false
+    severity: medium
+    timeout: 15

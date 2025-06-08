@@ -1,0 +1,13 @@
+# Ignore runtime data
+data/
+logs/
+output/
+
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+
+# Optional: ignore editor/OS files
+*.swp
+*.swo
+*.DS_Store

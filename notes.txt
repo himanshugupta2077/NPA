@@ -1,0 +1,187 @@
+Use Python
+Use separate files, logically grouped
+Use functions
+
+Execution Model:
+main.py imports each module.
+Each module exposes a main function (e.g., parse_scope(), check_alive(), run_scan())
+
+program uses a Primary State File. Central, always-current data used by all phases (scope, alive, port, vuln).
+Path: /project/NPA/data/state.json
+Role: Live storage of all information across modules:
+Scope metadata
+Host alive status
+Port scan results
+Service data
+Vulnerability results
+
+---
+
+in the project always write atomically (write temp → replace original)
+
+---
+
+/NPA/
+│
+├── main.py                    # Entry point, controls execution flow
+├── config.py                  # Global configs, paths, tool settings
+├── scope_input.py            # Handles manual/file input, validation, normalization
+├── alive_checker.py          # Pings/port checks to determine live hosts
+├── port_scanner.py           # Wrapper for Nmap/Masscan/etc.
+├── vuln_executor.py          # Launches predefined vuln templates/scripts
+├── report_writer.py          # Handles output formatting, saving, summaries
+
+---
+
+scope_input, alive_checker & port_scanner.py is completed.
+
+---
+
+here is my requirement: need a env_setup.py file that will check for all external and internal dependencies and ensure the environment is ready before starting scan operations. basically install tools and make sur they are accessible
+
+Failure Modes
+Fail early and verbosely: Missing tool → log + exit
+
+Ask once if user wants to install missing tools 
+
+Dump system info to logs/env_info.txt (OS, Python version, available disk space)
+have this line LOGS_FILE = os.path.join(BASE_DIR, 'env_info.txt') in config.py import it in env_setup.py
+warn if less than 2 gb space left
+Place init_env.py call inside main.py as first step before anything else
+Ensure script has write access to all needed paths. Alert if not.
+Check Python version ≥ 3.8
+Dependency Check (Tool Availability)
+Run checks for presence of all required tools and if they are accessible
+also do this:
+if tools are not accessible directly 
+try for rustscan {current user home dir}/.cargo/bin/rustscan
+try for go based tools: {current user home dir}/go/bin/naabu
+
+nmap (sudo apt install nmap)
+sudo apt install -y libpcap-dev cargo fping nbtscan jq awk grep sed
+rustscan (cargo install rustscan)
+naabu (go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest)
+netcat
+nuclei (go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest)
+
+Save init time + version info to state.json["metadata"]
+
+---
+
+below is how it works:
+
+┌──(wsl-kali㉿pc2077)-[~/project/NPA]
+└─$ python3 main.py
+=== Pentest Framework ===
+Automated Security Assessment Tool
+
+
+=== PHASE 1: SCOPE DEFINITION ===
+
+=== Scope Input Handler ===
+Choose input method:
+1. Manual input
+2. File input
+3. Exit
+Select option (1-3): 1
+
+Enter scope entries (IPs, CIDRs, or URLs). Enter 'done' when finished or 'exit' to quit:
+Examples:
+  - 192.168.1.1
+  - 10.0.0.0/24
+  - 2001:db8::/32
+  - https://example.com
+  - example.org
+> 192.168.1.17
+> done
+
+[+] Scope data saved to state file
+    Total targets: 1
+Legacy user scope saved to: /home/wsl-kali/project/NPA/scope/user_scope/scope_20250608_121322.txt
+Legacy normalized scope saved to: /home/wsl-kali/project/NPA/scope/normalized_scope/normalized_scope_20250608_121322.txt
+
+[+] Scope processing complete.
+
+=== PHASE 2: HOST DISCOVERY ===
+[*] Checking 1 targets for alive hosts...
+
+[*] Running fping scan...
+
+[*] Running nmap ping sweep...
+
+[*] Running nmap TCP SYN scan...
+
+[*] Running nmap TCP ACK scan...
+
+[*] Running nmap UDP scan...
+
+[*] Running netcat banner grab...
+
+[*] Running nbtscan...
+
+[+] Alive host detection results saved to state file
+[+] Alive hosts list saved to: /home/wsl-kali/project/NPA/alive/alive.txt
+
+[*] Found 1 alive hosts out of 1
+
+[+] Alive Hosts Summary (1 found):
+  - 192.168.1.17 (Detected by: ICMP Ping (fping), Ping Sweep (nmap), TCP SYN Scan (nmap), TCP ACK Scan (nmap), Netcat Banner Grab)
+
+=== PHASE 3: PORT SCANNING ===
+[*] Port scanning module coming soon...
+
+[+] Current State Summary:
+    - State file: /home/wsl-kali/project/NPA/data/state.json
+    - Total targets: 1
+    - Alive hosts: 1
+    - Scope completed: Yes
+    - Alive detection completed: Yes
+    - Last updated: 2025-06-08T12:13:39.913504
+
+[+] Pentest framework execution completed successfully.
+
+below is the project dir:
+
+┌──(wsl-kali㉿pc2077)-[~/project/NPA]
+└─$ tree
+.
+├── alive
+│ ├── alive.txt
+│ └── scan_output
+│     ├── fping_scan_20250608_121322.txt
+│     ├── nbtscan_20250608_121322.txt
+│     ├── netcat_20250608_121322.txt
+│     ├── nmap_ack_20250608_121322.gnmap
+│     ├── nmap_ack_20250608_121322.nmap
+│     ├── nmap_ack_20250608_121322.xml
+│     ├── nmap_sn_20250608_121322.gnmap
+│     ├── nmap_sn_20250608_121322.nmap
+│     ├── nmap_sn_20250608_121322.xml
+│     ├── nmap_syn_20250608_121322.gnmap
+│     ├── nmap_syn_20250608_121322.nmap
+│     ├── nmap_syn_20250608_121322.xml
+│     ├── nmap_udp_20250608_121322.gnmap
+│     ├── nmap_udp_20250608_121322.nmap
+│     └── nmap_udp_20250608_121322.xml
+├── alive_checker.py
+├── config.py
+├── data
+│ └── state.json
+├── main.py
+├── notes.txt
+├── __pycache__
+│ ├── alive_checker.cpython-313.pyc
+│ ├── config.cpython-313.pyc
+│ ├── port_scanner.cpython-313.pyc
+│ └── scope_input.cpython-313.pyc
+├── scope
+│ ├── normalized_scope
+│ │ └── normalized_scope_20250608_121322.txt
+│ └── user_scope
+│     └── scope_20250608_121322.txt
+└── scope_input.py
+
+8 directories, 28 files
+
+give env_setup.py and update other as seems neccesaary
+
