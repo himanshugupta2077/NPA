@@ -129,61 +129,78 @@ def create_target_list_file(targets, filename):
         print(f"Error creating target list file: {str(e)}")
         return False
 
-def run_naabu_full_port_scan(targets, timestamp):
-    """Run naabu full port scan excluding common ports"""
+def get_excluded_ports_string(common_ports):
+    """Convert common ports string to format suitable for rustscan exclusion"""
+    try:
+        # Convert common ports to a set for exclusion
+        excluded_ports = set(common_ports.split(','))
+        return ','.join(sorted(excluded_ports))
+    except Exception as e:
+        print(f"Error processing excluded ports: {str(e)}")
+        return common_ports
+
+def run_rustscan_full_port_scan(targets, timestamp):
+    """Run rustscan full port scan on all ports (1-65535)"""
     try:
         if not targets:
             return {}
         
         results = {}
         
-        # Create target list file
-        target_file = os.path.join(FULL_PORT_DIR, f'targets_{timestamp}.txt')
-        if not create_target_list_file(targets, target_file):
-            return {}
-        
-        print(f"[*] Running full port scan (excluding common ports) on {len(targets)} targets...")
-        
-        # Expand the ~ to full home directory path for naabu
-        naabu_path = os.path.expanduser('~/go/bin/naabu')
-        
-        # Check if naabu exists
-        if not os.path.exists(naabu_path):
-            print(f"    Error: naabu not found at {naabu_path}")
-            os.remove(target_file)
-            return {}
-        
-        # Construct naabu command
-        output_file = os.path.join(FULL_PORT_DIR, f'naabu_full_{timestamp}.json')
-        cmd = [
-            naabu_path,
-            '-l', target_file,
-            '-p', '-',
-            '-ep', COMMON_PORTS,
-            '-o', output_file,
-            '-j'
-        ]
-        
-        try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for target in targets:
+            print(f"[*] Running full port scan on {target}...")
             
-            # Parse naabu JSON output
-            results = parse_naabu_json_output(output_file)
+            # Expand the ~ to full home directory path
+            rustscan_path = os.path.expanduser('~/.cargo/bin/rustscan')
             
-            # Clean up target file
-            os.remove(target_file)
+            # Check if rustscan exists
+            if not os.path.exists(rustscan_path):
+                print(f"    Error: rustscan not found at {rustscan_path}")
+                results[target] = []
+                continue
             
-            return results
+            # Construct rustscan command for full port range
+            cmd = [
+                rustscan_path,
+                '-a', target,
+                '-p', '1-65535',  # Full port range
+                '--ulimit', '5000',
+                '-b', '50',  # Increased batch size for full scan
+                '--no-banner',
+                '-g'
+            ]
             
-        except subprocess.TimeoutExpired:
-            print(f"    Naabu full scan timeout")
-            return {}
-        except Exception as e:
-            print(f"    Error running naabu full scan: {str(e)}")
-            return {}
+            output_file = os.path.join(FULL_PORT_DIR, f'rustscan_full_{target}_{timestamp}.txt')
             
+            try:
+                with open(output_file, 'w') as f:
+                    result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE)  # 10 minute timeout
+                
+                # Parse rustscan output
+                open_ports = parse_rustscan_output(output_file)
+                
+                # Filter out common ports that were already scanned
+                common_ports_list = [int(p.strip()) for p in COMMON_PORTS.split(',')]
+                filtered_ports = [port for port in open_ports if port not in common_ports_list]
+                
+                results[target] = filtered_ports
+                
+                if filtered_ports:
+                    print(f"    Found new open ports (excluding common): {filtered_ports}")
+                else:
+                    print(f"    No new ports found beyond common ports")
+                    
+            except subprocess.TimeoutExpired:
+                print(f"    Rustscan full scan timeout for {target}")
+                results[target] = []
+            except Exception as e:
+                print(f"    Error running rustscan full scan on {target}: {str(e)}")
+                results[target] = []
+        
+        return results
+        
     except Exception as e:
-        print(f"Error in naabu full port scan: {str(e)}")
+        print(f"Error in rustscan full port scan: {str(e)}")
         return {}
 
 def parse_naabu_json_output(output_file):
@@ -397,7 +414,7 @@ def update_state_with_port_results(state, common_results, full_results, service_
                     if target in common_results and port in common_results[target]:
                         state["hosts"][target]["ports"][port]['discovered_by'].append('rustscan_common')
                     if target in full_results and port in full_results[target]:
-                        state["hosts"][target]["ports"][port]['discovered_by'].append('naabu_full')
+                        state["hosts"][target]["ports"][port]['discovered_by'].append('rustscan_full')
                 
                 # Update services if available
                 if target in service_results:
@@ -416,7 +433,7 @@ def update_state_with_port_results(state, common_results, full_results, service_
             "timestamp": timestamp,
             "ports_scanned": sorted(list(all_open_ports)),
             "total_open_ports": len(all_open_ports),
-            "methods_used": ["rustscan_common", "naabu_full", "nmap_service"]
+            "methods_used": ["rustscan_common", "rustscan_full", "nmap_service"]
         }
         
         # Update statistics
@@ -488,9 +505,9 @@ def run_scan():
         state = update_state_with_port_results(state, common_results, {}, {}, timestamp)
         save_state(state)
         
-        # Phase 2: Full port scan with naabu (excluding common ports)
-        print(f"\n[*] Phase 2: Full port scan (excluding common ports)...")
-        full_results = run_naabu_full_port_scan(alive_hosts, timestamp)
+        # Phase 2: Full port scan with rustscan (all ports 1-65535)
+        print(f"\n[*] Phase 2: Full port scan with rustscan (1-65535, excluding common ports)...")
+        full_results = run_rustscan_full_port_scan(alive_hosts, timestamp)
         print_open_ports_summary(full_results, "Full port")
         
         # Update state with full port results
