@@ -221,7 +221,7 @@ def run_nmap_service_scan(targets_with_ports, timestamp, scan_phase=""):
             ]
             
             try:
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
                 # Parse nmap XML output for services
                 xml_file = output_prefix + '.xml'
@@ -307,7 +307,7 @@ def run_nmap_pn_scan(targets, timestamp):
             ]
             
             try:
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
                 # Parse nmap XML output
                 xml_file = output_prefix + '.xml'
