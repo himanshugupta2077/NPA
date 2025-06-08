@@ -1,0 +1,241 @@
+Local Web App for my project:
+
+**Objective**: Build a local web app to view scan results stored in JSON and interactively run vulnerability templates against identified services. Display structure should be expandable with actionable elements tied to each service entry.
+
+---
+
+## Functional Breakdown
+
+### 1. **Data Source**
+
+* Input: JSON file containing structured data like:
+
+```json
+{
+  "metadata": {
+    "created": "2025-06-08T12:22:25.638815",
+    "last_updated": "2025-06-08T12:22:42.897818",
+    "version": "1.0"
+  },
+  "scope": {
+    "raw_entries": [
+      "192.168.1.17"
+    ],
+    "normalized_entries": [
+      "192.168.1.17"
+    ],
+    "total_targets": 1,
+    "timestamp": "20250608_122225"
+  },
+  "hosts": {
+    "192.168.1.17": {
+      "alive": true,
+      "detection_methods": [
+        "ICMP Ping (fping)",
+        "Ping Sweep (nmap)",
+        "TCP SYN Scan (nmap)",
+        "TCP ACK Scan (nmap)",
+        "Netcat Banner Grab"
+      ],
+      "ports": {
+        "21": {
+          "state": "open",
+          "protocol": "tcp",
+          "discovered_by": [
+            "rustscan_common"
+          ]
+        },
+        "22": {
+          "state": "open",
+          "protocol": "tcp",
+          "discovered_by": [
+            "rustscan_common"
+          ]
+        },
+        "80": {
+          "state": "open",
+          "protocol": "tcp",
+          "discovered_by": [
+            "rustscan_common"
+          ]
+        },
+        "445": {
+          "state": "open",
+          "protocol": "tcp",
+          "discovered_by": [
+            "rustscan_common"
+          ]
+        },
+        "3306": {
+          "state": "open",
+          "protocol": "tcp",
+          "discovered_by": [
+            "rustscan_common"
+          ]
+        },
+        "8080": {
+          "state": "open",
+          "protocol": "tcp",
+          "discovered_by": [
+            "rustscan_common"
+          ]
+        }
+      },
+      "services": {},
+      "last_scan": "20250608_122225"
+    }
+  },
+  "scans": {
+    "alive_detection": {
+      "completed": true,
+      "timestamp": "20250608_122225",
+      "methods_used": [
+        "ICMP Ping (fping)",
+        "Ping Sweep (nmap)",
+        "TCP SYN Scan (nmap)",
+        "TCP ACK Scan (nmap)",
+        "UDP Scan (nmap)",
+        "Netcat Banner Grab",
+        "NetBIOS/SMB Scan (nbtscan)"
+      ],
+      "total_alive": 1
+    },
+    "port_scanning": {
+      "completed": true,
+      "timestamp": "20250608_122242",
+      "ports_scanned": [
+        21,
+        22,
+        80,
+        445,
+        3306,
+        8080
+      ],
+      "total_open_ports": 6,
+      "methods_used": [
+        "rustscan_common",
+        "naabu_full",
+        "nmap_service"
+      ]
+    }
+  },
+  "statistics": {
+    "total_targets": 1,
+    "alive_hosts": 1,
+    "total_open_ports": 6,
+    "services_identified": 0
+  }
+}
+```
+
+* Output: Updated JSON file per interaction (e.g., template execution)
+
+---
+
+## UI Design (Hierarchical)
+
+### Top-Level: IP
+Next level IP\:Port Rows
+
+* Each row = `IP:Port`
+* Display fields:
+
+  * IP
+  * Port
+  * Service Name
+  * Version
+
+### Expandable Sub-Row (On Click)
+
+* Section under the row opens
+* For each matching vuln template:
+
+  * **Button**: "Run Template"
+  * **Status**: Pass / Fail / Not Run
+  * **Output**: Truncated view or icon to expand
+  * **Report Button**: Export details to file
+
+---
+
+## Behavior Logic
+
+* On page load:
+
+  * Parse and load JSON data
+  * For each IP, display list of ports with service info
+  * Identify matching templates using fingerprint rules
+
+* On row expand:
+
+  * Dynamically show relevant template buttons
+  * If template already run: disable button, show result
+
+* On "Run Template":
+
+  * Execute backend script
+  * Update `vulns` block in JSON
+  * Refresh sub-row status
+
+* On "Report":
+
+  * Export relevant vulnerability result (formatted) to file or modal
+
+---
+
+## State Management
+
+* Frontend:
+
+  * Lightweight state (IP→Port→Template→Status)
+  * Use dynamic DOM rendering on expand
+* Backend:
+
+  * JSON is single source of truth
+  * Atomic file write after template execution
+
+---
+
+## Tech Recommendations
+
+### Frontend:
+
+* **Framework**: React (preferred for dynamic UI), or plain JS with Alpine.js if minimal
+* **Tree View**: Simple expandable div blocks, no external tree-lib required
+* **UI Lib**: TailwindCSS for fast layout styling
+
+### Backend:
+
+* **Flask** or **FastAPI**
+* Endpoint to:
+
+  * Serve JSON
+  * Run template script
+  * Return result (status, output)
+  * Trigger report export
+
+### Storage:
+
+* JSON file updated per interaction
+* Optional: Lock file during writes to avoid race conditions
+
+---
+
+## Constraints to Handle
+
+* Concurrency: Locking during template run
+* Template filtering: Only show applicable ones
+* Output sanitation: No raw command output leaks
+* Stateless UI: All state reflects JSON on disk
+
+---
+
+## Summary
+
+* Single-page app with hierarchical view
+* Clickable rows expand into actionable buttons
+* Output and report generation inline
+* Reads and writes to a single JSON file
+* Modular backend runs template and updates data
+* Lightweight, local-only, self-contained
+
+Next: layout blueprint or backend API structure.

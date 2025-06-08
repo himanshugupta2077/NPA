@@ -1,0 +1,2 @@
+instead of code; give me idea of a script for internal network pentest for below task:
+
