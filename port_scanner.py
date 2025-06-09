@@ -210,6 +210,7 @@ def run_nmap_service_scan(targets_with_ports, timestamp, scan_phase=""):
                                        f'nmap_sV_{target}_{scan_phase}_{timestamp}')
             cmd = [
                 'nmap',
+                '-Pn',
                 '-sV', '-O',
                 '-p', ','.join(map(str, ports)),
                 target,
