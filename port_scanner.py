@@ -490,6 +490,66 @@ def print_open_ports_summary(results, scan_type):
     except Exception as e:
         print(f"Error printing port summary: {str(e)}")
 
+def run_nmap_pn_service_scan(targets_with_ports, timestamp, scan_phase=""):
+    """Run nmap Pn service version scan on specified ports for given targets"""
+    try:
+        if not targets_with_ports:
+            print(f"[*] No open ports found for Pn service scanning in {scan_phase}")
+            return {}
+        
+        print(f"[*] Running Pn service version scan on {len(targets_with_ports)} targets ({scan_phase})...")
+        
+        results = {}
+        
+        for target, ports in targets_with_ports.items():
+            if not ports:
+                continue
+                
+            print(f"[*] Scanning services on {target} with Pn flag (ports: {','.join(map(str, ports[:5]))}{'...' if len(ports) > 5 else ''})")
+            
+            # Create nmap Pn service command
+            if "pn" in scan_phase.lower():
+                output_prefix = os.path.join(COMMON_PORT_PN_DIR if "common" in scan_phase.lower() else FULL_PORT_PN_DIR, 
+                                           f'nmap_pn_sV_{target}_{scan_phase}_{timestamp}')
+            else:
+                output_prefix = os.path.join(COMMON_PORT_PN_DIR, f'nmap_pn_sV_{target}_{scan_phase}_{timestamp}')
+            
+            cmd = [
+                'nmap',
+                '-sV',  # Service version detection
+                '-O',   # OS detection
+                '-Pn',  # Skip ping, treat host as online
+                '-p', ','.join(map(str, ports)),
+                target,
+                '-oA', output_prefix
+            ]
+            
+            try:
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                # Parse nmap XML output for services
+                xml_file = output_prefix + '.xml'
+                services = parse_nmap_service_output(xml_file)
+                results[target] = services
+                
+                if services:
+                    print(f"    Found services with Pn: {list(services.keys())}")
+                else:
+                    print(f"    No detailed service info extracted with Pn")
+                
+            except subprocess.TimeoutExpired:
+                print(f"    Pn service scan timeout for {target}")
+                results[target] = {}
+            except Exception as e:
+                print(f"    Error running Pn service scan on {target}: {str(e)}")
+                results[target] = {}
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error in nmap Pn service scan: {str(e)}")
+        return {}
+
 def run_scan():
     """Main port scanning function"""
     try:
@@ -595,8 +655,16 @@ def run_scan():
                                 'discovered_by': ['nmap_pn']
                             }
                 
-                # Update state with Pn scan results
-                state = update_state_with_port_results(state, pn_results, {}, timestamp, "pn_scan")
+                # Phase 3.5: NEW - Pn Service scan on newly found ports
+                targets_with_pn_ports = {target: ports for target, ports in pn_results.items() if ports}
+                if targets_with_pn_ports:
+                    print(f"\n[*] Phase 3.5: Running Pn service scan on newly discovered ports...")
+                    service_results_pn = run_nmap_pn_service_scan(targets_with_pn_ports, timestamp, "pn_common_ports")
+                else:
+                    service_results_pn = {}
+                
+                # Update state with Pn scan results and services
+                state = update_state_with_port_results(state, pn_results, service_results_pn, timestamp, "pn_scan")
                 
                 # Update statistics
                 state["statistics"]["alive_hosts"] = sum(
@@ -605,7 +673,7 @@ def run_scan():
                 
                 state = update_state_metadata(state)
                 save_state(state)
-                print("[+] State updated after Pn scan")
+                print("[+] State updated after Pn scan and service detection")
             else:
                 print(f"[-] Pn scan found no responsive hosts among non-alive targets.")
         
@@ -646,12 +714,12 @@ def run_scan():
                 
                 print(f"[+] Total additional ports discovered in full Pn scan: {total_new_ports}")
                 
-                # Phase 4.5: Service scan on newly found full ports
+                # Phase 4.5: NEW - Pn Service scan on newly found full ports (replacing old service scan)
                 if pn_full_results:
                     targets_with_pn_full_ports = {target: ports for target, ports in pn_full_results.items() if ports}
                     if targets_with_pn_full_ports:
-                        print(f"\n[*] Phase 4.5: Running service scan on newly discovered full ports...")
-                        service_results_pn_full = run_nmap_service_scan(targets_with_pn_full_ports, timestamp, "pn_full_ports")
+                        print(f"\n[*] Phase 4.5: Running Pn service scan on newly discovered full ports...")
+                        service_results_pn_full = run_nmap_pn_service_scan(targets_with_pn_full_ports, timestamp, "pn_full_ports")
                     else:
                         service_results_pn_full = {}
                 else:
