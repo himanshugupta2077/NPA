@@ -23,6 +23,7 @@ NORMALIZED_SCOPE_DIR = os.path.join(SCOPE_DIR, 'normalized_scope')
 OPEN_PORT_DIR = os.path.join(DATA_DIR, 'open_port')
 COMMON_PORT_DIR = os.path.join(OPEN_PORT_DIR, 'common_port')
 FULL_PORT_DIR = os.path.join(OPEN_PORT_DIR, 'full_port')
+COMMON_PORT_PN_DIR = os.path.join(OPEN_PORT_DIR, 'common_port_pn')
 FULL_PORT_PN_DIR = os.path.join(OPEN_PORT_DIR, 'full_port_pn')
 
 # Ensure directories exist
@@ -37,7 +38,7 @@ for directory in [
     OPEN_PORT_DIR,
     COMMON_PORT_DIR,
     FULL_PORT_DIR,
-    FULL_PORT_PN_DIR
+    COMMON_PORT_PN_DIR
 ]:
     os.makedirs(directory, exist_ok=True)
 

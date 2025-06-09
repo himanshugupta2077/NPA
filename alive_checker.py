@@ -379,10 +379,6 @@ def check_alive():
         nmap_udp_prefix = os.path.join(SCAN_OUTPUT_DIR, f'nmap_udp_{timestamp}')
         alive_results["nmap_udp"] = run_nmap_udp_scan(targets, nmap_udp_prefix)
         
-        # print("\n[*] Running netcat banner grab...")
-        # netcat_output = os.path.join(SCAN_OUTPUT_DIR, f'netcat_{timestamp}.txt')
-        # alive_results["netcat"] = run_netcat_banner_grab(targets, netcat_output)
-        
         print("\n[*] Running nbtscan...")
         nbtscan_output = os.path.join(SCAN_OUTPUT_DIR, f'nbtscan_{timestamp}.txt')
         alive_results["nbtscan"] = run_nbtscan(targets, nbtscan_output)
@@ -402,10 +398,15 @@ def check_alive():
             alive_count = state["statistics"]["alive_hosts"]
             print(f"\n[*] Found {alive_count} alive hosts out of {len(targets)}")
             
+            # Return True even if no alive hosts found to continue to port scanning
             return True
         else:
             print("[-] Failed to save alive detection results")
             return False
+    
+    except Exception as e:
+        print(f"[-] Error in check_alive: {str(e)}")
+        return False
     
     except Exception as e:
         print(f"[-] Error in check_alive: {str(e)}")

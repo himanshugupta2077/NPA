@@ -5,16 +5,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from config import BASE_DIR, DATA_DIR, OPEN_PORT_DIR, COMMON_PORT_DIR, FULL_PORT_DIR, FULL_PORT_PN_DIR, load_state, save_state, update_state_metadata, get_timestamp
+from config import BASE_DIR, DATA_DIR, OPEN_PORT_DIR, COMMON_PORT_DIR, FULL_PORT_DIR, COMMON_PORT_PN_DIR, FULL_PORT_PN_DIR, load_state, save_state, update_state_metadata, get_timestamp
 
 # Constants - DO NOT CHANGE THESE PORTS
-COMMON_PORTS = "21,22,23,25,53,80,88,110,111,123,135,137,138,139,143,161,162,389,443,445,464,514,636,873,902,912,1025,1433,1521,2049,3306,3389,5432,5900,5985,5986,6379,8000,8080,8443,9000,9090"
-
-def ensure_directories():
-    """Create necessary directories if they don't exist"""
-    os.makedirs(COMMON_PORT_DIR, exist_ok=True)
-    os.makedirs(FULL_PORT_DIR, exist_ok=True)
-    os.makedirs(FULL_PORT_PN_DIR, exist_ok=True)
+COMMON_PORTS = "21,22,23,25,53,80,81,88,110,111,123,135,137,138,139,143,161,162,300,389,443,445,464,514,591,593,636,832,873,902,912,981,1010,1025,1099,1311,1433,1521,2049,2082,2095,2096,2480,3000,3128,3306,3333,3389,4243,4567,4711,4712,4993,5000,5104,5108,5280,5281,5432,5601,5800,5900,5985,5986,6379,6543,7000,7001,7396,7474,8000,8001,8008,8014,8042,8060,8069,8080,8081,8083,8088,8090,8091,8095,8118,8123,8172,8181,8222,8243,8280,8281,8333,8337,8443,8500,8834,8880,8888,8983,9000,9001,9043,9060,9080,9090,9091,9200,9443,9502,9800,9981,10000,10250,11371,12443,15672,16080,17778,18091,18092,20720,32000,55440,55672"
 
 def get_alive_hosts(state):
     """Extract alive hosts from state"""
@@ -129,7 +123,7 @@ def get_excluded_ports_string(common_ports):
         return common_ports
 
 def run_rustscan_full_port_scan(targets, timestamp):
-    """Run rustscan full port scan on all ports (1-65535)"""
+    """Run rustscan full port scan on all ports (1-65535) excluding common ports"""
     try:
         if not targets:
             return {}
@@ -137,7 +131,7 @@ def run_rustscan_full_port_scan(targets, timestamp):
         results = {}
         
         for target in targets:
-            print(f"[*] Running full port scan on {target}...")
+            print(f"[*] Running full port scan on {target} (excluding common ports)...")
             
             # Expand the ~ to full home directory path
             rustscan_path = os.path.expanduser('~/.cargo/bin/rustscan')
@@ -148,13 +142,14 @@ def run_rustscan_full_port_scan(targets, timestamp):
                 results[target] = []
                 continue
             
-            # Construct rustscan command for full port range
+            # Construct rustscan command for full port range excluding common ports
             cmd = [
                 rustscan_path,
                 '-a', target,
                 '-p', '1-65535',  # Full port range
+                '--exclude-ports', COMMON_PORTS,  # Exclude common ports during scan
                 '--ulimit', '5000',
-                '-b', '50',  # Increased batch size for full scan
+                '-b', '10',
                 '--no-banner',
                 '-g'
             ]
@@ -163,12 +158,13 @@ def run_rustscan_full_port_scan(targets, timestamp):
             
             try:
                 with open(output_file, 'w') as f:
-                    result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE)  # 10 minute timeout
+                    result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE)
                 
                 # Parse rustscan output
                 open_ports = parse_rustscan_output(output_file)
                 
-                # Filter out common ports that were already scanned
+                # The ports should already be filtered by rustscan, but double-check
+                # to ensure no common ports are included
                 common_ports_list = [int(p.strip()) for p in COMMON_PORTS.split(',')]
                 filtered_ports = [port for port in open_ports if port not in common_ports_list]
                 
@@ -296,7 +292,7 @@ def run_nmap_pn_scan(targets, timestamp):
             print(f"[*] Running Pn scan on {target}...")
             
             # Create nmap Pn command
-            output_prefix = os.path.join(FULL_PORT_PN_DIR, f'nmap_pn_{target}_{timestamp}')
+            output_prefix = os.path.join(COMMON_PORT_PN_DIR, f'nmap_pn_{target}_{timestamp}')
             cmd = [
                 'nmap',
                 '-Pn',  # Skip ping, treat all hosts as online
@@ -328,6 +324,61 @@ def run_nmap_pn_scan(targets, timestamp):
         
     except Exception as e:
         print(f"Error in nmap Pn scan: {str(e)}")
+        return {}
+
+def run_nmap_pn_full_port_scan(targets, timestamp):
+    """Run nmap Pn full port scan on non-alive hosts (1-65535, excluding common ports)"""
+    try:
+        if not targets:
+            return {}
+        
+        print(f"[*] Running exhaustive Pn full port scan on {len(targets)} non-alive hosts...")
+        print(f"[*] This will scan ports 1-65535 excluding common ports and may take considerable time...")
+        
+        results = {}
+        common_ports_list = [int(p.strip()) for p in COMMON_PORTS.split(',')]
+        
+        for target in targets:
+            print(f"[*] Running full port Pn scan on {target} (excluding {len(common_ports_list)} common ports)...")
+            
+            # Create excluded ports string for nmap
+            excluded_ports_str = ','.join(map(str, common_ports_list))
+            
+            # Create nmap Pn command for full port range excluding common ports
+            output_prefix = os.path.join(FULL_PORT_PN_DIR, f'nmap_pn_full_{target}_{timestamp}')
+            cmd = [
+                'nmap',
+                '-Pn',  # Skip ping, treat all hosts as online
+                '-sS',  # SYN scan
+                '-p', f'1-65535',  # Full port range
+                '--exclude-ports', excluded_ports_str,  # Exclude common ports
+                target,
+                '-oA', output_prefix
+            ]
+            
+            try:
+                print(f"    Starting full port scan on {target}... (This may take some minutes)")
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                # Parse nmap XML output
+                xml_file = output_prefix + '.xml'
+                open_ports = parse_nmap_pn_output(xml_file)
+                
+                if open_ports:
+                    results[target] = open_ports
+                    print(f"    Found additional open ports: {open_ports}")
+                else:
+                    print(f"    No additional ports found beyond common ports")
+                    
+            except subprocess.TimeoutExpired:
+                print(f"    Nmap Pn full scan timeout for {target} (exceeded 1 hour)")
+            except Exception as e:
+                print(f"    Error running nmap Pn full scan on {target}: {str(e)}")
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error in nmap Pn full port scan: {str(e)}")
         return {}
 
 def parse_nmap_pn_output(xml_file):
@@ -444,9 +495,6 @@ def run_scan():
     try:
         print("[*] Starting port scanning phase...")
         
-        # Ensure directories exist
-        ensure_directories()
-        
         # Load current state
         state = load_state()
         
@@ -560,6 +608,68 @@ def run_scan():
                 print("[+] State updated after Pn scan")
             else:
                 print(f"[-] Pn scan found no responsive hosts among non-alive targets.")
+        
+        # Phase 4: NEW - Full port Pn scan on non-alive hosts
+        if non_alive_hosts:
+            print(f"\n[*] Phase 4: Running exhaustive full port Pn scan on {len(non_alive_hosts)} non-alive hosts...")
+            print(f"[*] This phase scans all ports (1-65535) excluding common ports using -Pn flag")
+            print(f"[*] Warning: This may take significant time (10-30 minutes per host)")
+            
+            pn_full_results = run_nmap_pn_full_port_scan(non_alive_hosts, timestamp)
+            
+            if pn_full_results:
+                print(f"[!] Full port Pn scan discovered additional open ports:")
+                total_new_ports = 0
+                for target, ports in pn_full_results.items():
+                    print(f"    {target}: {ports} ({len(ports)} additional ports)")
+                    total_new_ports += len(ports)
+                    
+                    # Update state for newly discovered ports
+                    if target in state["hosts"]:
+                        # Mark host as alive if new ports found
+                        if ports:
+                            state["hosts"][target]["alive"] = True
+                            if "detection_methods" not in state["hosts"][target]:
+                                state["hosts"][target]["detection_methods"] = []
+                            if "Pn_Full_Scan" not in state["hosts"][target]["detection_methods"]:
+                                state["hosts"][target]["detection_methods"].append("Pn_Full_Scan")
+                        
+                        # Add ports
+                        if "ports" not in state["hosts"][target]:
+                            state["hosts"][target]["ports"] = {}
+                        for port in ports:
+                            state["hosts"][target]["ports"][port] = {
+                                'state': 'open',
+                                'protocol': 'tcp',
+                                'discovered_by': ['nmap_pn_full']
+                            }
+                
+                print(f"[+] Total additional ports discovered in full Pn scan: {total_new_ports}")
+                
+                # Phase 4.5: Service scan on newly found full ports
+                if pn_full_results:
+                    targets_with_pn_full_ports = {target: ports for target, ports in pn_full_results.items() if ports}
+                    if targets_with_pn_full_ports:
+                        print(f"\n[*] Phase 4.5: Running service scan on newly discovered full ports...")
+                        service_results_pn_full = run_nmap_service_scan(targets_with_pn_full_ports, timestamp, "pn_full_ports")
+                    else:
+                        service_results_pn_full = {}
+                else:
+                    service_results_pn_full = {}
+                
+                # Update state with full Pn scan results and services
+                state = update_state_with_port_results(state, pn_full_results, service_results_pn_full, timestamp, "pn_full_scan")
+                
+                # Update statistics
+                state["statistics"]["alive_hosts"] = sum(
+                    1 for data in state["hosts"].values() if data.get("alive", False)
+                )
+                
+                state = update_state_metadata(state)
+                save_state(state)
+                print("[+] State updated after full port Pn scan and service detection")
+            else:
+                print(f"[-] Full port Pn scan found no additional ports on non-alive targets.")
         
         print(f"\n[+] Port scanning phase completed successfully.")
         return True
