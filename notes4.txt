@@ -1,0 +1,9 @@
+when main.py start and scope normalizer, i want it to first check if user has submitted same input as previous and if so, then ask user if they would like to skip normalization of scope since its already done. for ex: Found normalized scope of same scope provided, would you like to normalize again? if yes, normalize and use the updated one
+
+when app starts and goes for a alive check, check once if there is an previous already completed alive check. if there is then ask user would they like to repeat alive check since there is one already done. for ex: Found alive scan of same normalized scope completed {when time}, would you like to run alive check again? if yes, do a alive check and use the updated one
+
+this is important: i want a process that can help resume port scans if they get inturrepted or something. it would be greate if we logs things as we go in state.json for port scan and then if the program is able to resume through it.
+
+is it possible to save everything that was on terminal screen after i ran main.py and then to end of program "Pentest framework execution completed successfully." it will save everything in txt in data log?
+
+also need colors
